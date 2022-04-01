@@ -1,0 +1,253 @@
+- hosts: vpn-server
+  gather_facts: false
+  vars_files:
+    - vars_files/var_file_strings.yml
+  tasks:
+    - name: Check if pki/reqs/client.req exists
+      stat:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/reqs/{{ item.ovpn_client_name }}.req
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+      register: clikey
+    - name: Create client request
+      expect:
+        command: podman run -v ovpn-data:/etc/openvpn --rm -it {{ vpn_server_image }} easyrsa build-client-full {{ item.item.ovpn_client_name }} pass
+        responses:
+          'Enter PEM pass phrase': '{{ item.item.ovpn_client_pass }}'
+          'Verifying - Enter PEM pass phrase': '{{ item.item.ovpn_client_pass }}'
+      with_items:
+        - "{{ clikey.results }}"
+      when: item.stat.exists == False
+    - name: Check if client folder exists
+      stat:
+        path: /home/{{ item.ovpn_client_name }}
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+      register: ovpncliefolder
+    - name: Create client folder
+      file:
+        path: /home/{{ item.item.ovpn_client_name }}
+        state: directory
+        mode: '755'
+      with_items: 
+        - "{{ ovpncliefolder.results }}"
+      when: item.stat.exists == False
+    - name: Check if client.conf exists
+      stat:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+      register: ovpnclieconf
+    - name: Create client.conf
+      file:
+        path: /home/{{ item.item.ovpn_client_name }}/1-{{ item.item.ovpn_client_name }}.conf
+        state: touch
+        mode: '755'
+      with_items: 
+        - "{{ ovpnclieconf.results }}"
+      when: item.stat.exists == False
+    - name: Configure client
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: client
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure network device
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: dev {{ vpn_server_dev }}
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure protocol
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: proto {{ vpn_server_proto }}
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure vpn server access IP address and port
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: remote {{ vpn_server_ip }} {{ vpn_server_port }}
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure resolv-retry
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: resolv-retry {{ item.vpn_client_res_ret }}
+      with_items: 
+        - "{{ ovpn_clients_vars }}"    
+    - name: Configure bind
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: "{{ item.vpn_client_bind }}"
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure user
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: user {{ vpn_server_user }}
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure group
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: group {{ vpn_server_group }}
+      with_items: 
+        - "{{ ovpn_clients_vars }}"        
+    - name: Configure persist-key
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: persist-key
+      with_items: 
+        - "{{ ovpn_clients_vars }}" 
+    - name: Configure persist-tun
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: persist-tun
+      with_items: 
+        - "{{ ovpn_clients_vars }}" 
+    - name: Configure ca.crt
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: ca ca.crt        
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure client.crt
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: cert {{ item.ovpn_client_name }}.crt
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure client.key
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: key {{ item.ovpn_client_name }}.key
+      with_items: 
+        - "{{ ovpn_clients_vars }}"     
+    - name: Configure remote-cert-tls
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: remote-cert-tls server
+      with_items: 
+        - "{{ ovpn_clients_vars }}"    
+    - name: Configure tls-auth
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: tls-auth ta.key 1
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Configure cipher
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: cipher {{ vpn_server_cipher }} 
+      with_items: 
+        - "{{ ovpn_clients_vars }}" 
+    - name: Configure verb
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name }}/1-{{ item.ovpn_client_name }}.conf
+        line: verb {{ vpn_server_verb }}
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Copy ca.crt to client folder
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/ca.crt
+        dest: /home/{{ item.ovpn_client_name }}/2-ca.crt
+        remote_src: yes
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Copy ta.key to client folder
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/ta.key
+        dest: /home/{{ item.ovpn_client_name }}/5-ta.key
+        remote_src: yes
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Copy client.crt to client folder
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/issued/{{ item.ovpn_client_name }}.crt
+        dest: /home/{{ item.ovpn_client_name }}/3-{{ item.ovpn_client_name }}.crt
+        remote_src: yes
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Copy client.key to client folder
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/private/{{ item.ovpn_client_name }}.key
+        dest: /home/{{ item.ovpn_client_name }}/4-{{ item.ovpn_client_name }}.key
+        remote_src: yes
+      with_items: 
+        - "{{ ovpn_clients_vars }}"
+    - name: Check if ovpn file exists
+      stat:
+        path: /home/{{ item.ovpn_client_name }}.ovpn
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+      register: ovpnfile
+    - name: Delete ovpn file
+      file:
+        path: /home/{{ item.itme.ovpn_client_name }}.ovpn
+        status: absent
+      with_items: 
+        - "{{ ovpnfile.results }}"
+      when: item.stat.exists == True
+    - name: Create ovpn file
+      assemble:
+        src: /home/{{ item.ovpn_client_name }}
+        dest: /home/{{ item.ovpn_client_name }}/{{ item.ovpn_client_name }}.ovpn
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+    - name: Create ovpn file - ca sign begin
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name}}/{{ item.ovpn_client_name }}.ovpn
+        line: <ca>
+        insertafter: 'verb'
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+    - name: Create ovpn file - ca sign end
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name}}/{{ item.ovpn_client_name }}.ovpn
+        line: </ca>
+        insertbefore: 'Certificate:'
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+    - name: Create ovpn file - cert sign begin
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name}}/{{ item.ovpn_client_name }}.ovpn
+        line: <cert>
+        insertbefore: 'Certificate:'
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+    - name: Create ovpn file - cert sign end
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name}}/{{ item.ovpn_client_name }}.ovpn
+        line: </cert>
+        insertbefore: '-----BEGIN ENCRYPTED PRIVATE KEY-----'
+      with_items:
+        - "{{ ovpn_clients_vars }}" 
+    - name: Create ovpn file - key sign begin
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name}}/{{ item.ovpn_client_name }}.ovpn
+        line: <key>
+        insertbefore: '-----BEGIN ENCRYPTED PRIVATE KEY-----'
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+    - name: Create ovpn file - key sign end
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name}}/{{ item.ovpn_client_name }}.ovpn
+        line: </key>
+        insertafter: '-----END ENCRYPTED PRIVATE KEY-----'
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+    - name: Create ovpn file - tls-auth sign begin
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name}}/{{ item.ovpn_client_name }}.ovpn
+        line: <tls-auth>
+        insertafter: '</key>'
+      with_items:
+        - "{{ ovpn_clients_vars }}"
+    - name: Create ovpn file - tls-auth sign end
+      lineinfile:
+        path: /home/{{ item.ovpn_client_name}}/{{ item.ovpn_client_name }}.ovpn
+        line: </tls-auth>
+        insertafter: '-----END OpenVPN Static key V1-----'
+      with_items:
+        - "{{ ovpn_clients_vars }}"

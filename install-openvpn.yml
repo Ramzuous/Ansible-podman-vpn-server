@@ -1,0 +1,205 @@
+- hosts: vpn-server
+  gather_facts: false
+  vars_files:
+    - vars_files/var_file_strings.yml
+  tasks:
+    - name: Update
+      dnf:
+        name: "*"
+        state: latest
+    - name: Install components
+      dnf:
+        name: 
+          - python3
+          - python3-pip
+          - crun
+          - runc
+          - iptables
+        state: latest
+    - name: Install podman
+      dnf:
+        name: podman
+        state: present
+    - name: Install pexpect
+      pip:
+        name: pexpect
+    - name: Pull ovpn image
+      containers.podman.podman_image:
+        name: "{{ vpn_server_image }}"
+    - name: Create podman volume for vpnserver
+      containers.podman.podman_volume:
+        state: present
+        name: ovpn-data
+        recreate: no
+    - name: modprobe ip_tables
+      modprobe: 
+        name: ip_tables
+    - name: Create module file
+      file:
+        path: /etc/modules
+        state: touch
+    - name: line ip_tables
+      lineinfile:
+        path: /etc/modules
+        line: ip_tables
+    - name: Create ovpn config
+      containers.podman.podman_container:
+        name: "{{ vpn_server_name }}"
+        image: "{{ vpn_server_image }}"
+        rm: yes
+        volume:
+          - ovpn-data:/etc/openvpn
+        command: ovpn_genconfig -u {{ vpn_server_proto }}://{{ vpn_server_ip }}:{{ vpn_server_port }}
+    - name: Check if pki folder exists
+      stat:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/pki
+      register: ovpnpkifolder
+    - name: ovpn init-pki
+      expect:
+        command: podman run --name {{ vpn_server_name }} -v ovpn-data:/etc/openvpn --rm -it {{ vpn_server_image }} ovpn_initpki nopass
+        responses:
+          'Common Name': '{{ vpn_server_name }}'
+        timeout: 300
+      when: not ovpnpkifolder.stat.exists 
+    - name: Remove /etc/openvpn/server.conf
+      file:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        state: absent
+    - name: Create /etc/openvpn/server.conf
+      file:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        state: touch
+        mode: '755'
+    - name: Configure port
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: port {{ vpn_server_port }}
+    - name: Configure protocol
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: proto {{ vpn_server_proto }}       
+    - name: Configure network device
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: dev {{ vpn_server_dev }}
+    - name: Configure ca.crt
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: ca ca.crt
+    - name: Configure server.crt
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: cert {{ vpn_server_ip }}.crt
+    - name: Configure server.key
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: key {{ vpn_server_ip }}.key
+    - name: Configure dh.pem
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: dh dh.pem
+    - name: Configure network
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: server {{ vpn_server_network }}       
+    - name: Configure push redirect-gateway
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: 'push "redirect-gateway def1 bypass-dhcp"'
+    - name: Configure push shcp-option DNS1
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: 'push "dhcp-option DNS {{ vpn_server_dns_1 }}"'    
+    - name: Configure push shcp-option DNS2
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: 'push "dhcp-option DNS {{ vpn_server_dns_2 }}"'       
+    - name: Configure keepalive
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: keepalive {{ vpn_server_keepalive }}
+    - name: Configure tls-auth
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: tls-auth ta.key 0
+    - name: Configure cipher
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: cipher {{ vpn_server_cipher }}     
+    - name: Configure user
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: user {{ vpn_server_user }}         
+    - name: Configure group
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: group {{ vpn_server_group }}  
+    - name: Configure persist-key
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: persist-key
+    - name: Configure persist-tun
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: persist-tun
+    - name: Configure status path
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: status {{ vpn_server_status_path }}
+    - name: Configure log path
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: log {{ vpn_server_log_path }}
+    - name: Configure log-append path
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: log-append {{ vpn_server_log_append_path }}
+    - name: Configure verb
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: verb {{ vpn_server_verb }}
+    - name: Configure explicit-exit-notify
+      lineinfile:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/openvpn.conf
+        line: explicit-exit-notify {{ vpn_server_exp_exit_not }}
+    - name: Copy dh.pem to /etc/openvpn
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/dh.pem
+        dest: /var/lib/containers/storage/volumes/ovpn-data/_data
+        remote_src: yes
+    - name: Copy ca.crt to /etc/openvpn
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/ca.crt
+        dest: /var/lib/containers/storage/volumes/ovpn-data/_data
+        remote_src: yes
+    - name: Copy ta.key to /etc/openvpn
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/ta.key
+        dest: /var/lib/containers/storage/volumes/ovpn-data/_data
+        remote_src: yes
+    - name: Copy server.crt to /etc/openvpn
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/issued/{{ vpn_server_ip }}.crt
+        dest: /var/lib/containers/storage/volumes/ovpn-data/_data
+        remote_src: yes
+    - name: Copy server.key to /etc/openvpn
+      copy:
+        src: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/private/{{ vpn_server_ip }}.key
+        dest: /var/lib/containers/storage/volumes/ovpn-data/_data
+        remote_src: yes
+    - name: Create OVPN container
+      containers.podman.podman_container:
+        name: "{{ vpn_server_name }}"
+        image: "{{ vpn_server_image }}"
+        state: started
+        device: "/dev/net/tun:/dev/net/tun"
+        detach: yes
+        cap_add: NET_ADMIN
+        volume:
+          - ovpn-data:/etc/openvpn
+        generate_systemd:
+          restart_policy: always
+        ports:
+          - "{{ vpn_server_port }}:{{ vpn_server_port }}/{{ vpn_server_proto }}"          
+    - name: Create iptables
+      command: podman exec -it {{ vpn_server_name }} iptables -t nat -A POSTROUTING -s {{ vpn_server_network_different_mask }} -o {{ vpn_server_dev_out }} -j MASQUERADE

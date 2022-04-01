@@ -1,0 +1,23 @@
+- hosts: vpn-server
+  gather_facts: false
+  vars_files:
+    - vars_files/var_file_strings.yml
+  tasks:
+    - name: Check if pki/crl.pem exists
+      stat:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/crl.pem
+      register: crlpem
+    - name: Delete pki/crl.pem
+      file:
+        path: /var/lib/containers/storage/volumes/ovpn-data/_data/pki/crl.pem
+        state: absent
+      when: crlpem.stat.exists
+    - name: Call revoke option
+      expect:
+        command: podman run -v ovpn-data:/etc/openvpn --rm -it docker.io/kylemanna/openvpn ovpn_revokeclient "{{ ovpn_client_to_remove_name }}"
+        responses:
+          'Continue with revocation': 'yes'
+    - name: Delete ovpn client folders
+      file:
+        path: /home/{{ ovpn_client_to_remove_name }}
+        state: absent
